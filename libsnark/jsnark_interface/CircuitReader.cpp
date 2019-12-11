@@ -6,7 +6,7 @@
 
 #include "CircuitReader.hpp"
 
-CircuitReader::CircuitReader(char* arithFilepath, char* inputsFilepath,
+CircuitReader::CircuitReader(const char* arithFilepath, const char* inputsFilepath,
 		ProtoboardPtr pb) {
 
 	this->pb = pb;
@@ -25,7 +25,7 @@ CircuitReader::CircuitReader(char* arithFilepath, char* inputsFilepath,
 	zeroPwires.clear();
 }
 
-void CircuitReader::parseAndEval(char* arithFilepath, char* inputsFilepath) {
+void CircuitReader::parseAndEval(const char* arithFilepath, const char* inputsFilepath) {
 
 	libff::enter_block("Parsing and Evaluating the circuit");
 
@@ -216,7 +216,7 @@ void CircuitReader::parseAndEval(char* arithFilepath, char* inputsFilepath) {
 	 libff::leave_block("Parsing and Evaluating the circuit");
 }
 
-void CircuitReader::constructCircuit(char* arithFilepath) {
+void CircuitReader::constructCircuit(const char* arithFilepath) {
 
 
 
