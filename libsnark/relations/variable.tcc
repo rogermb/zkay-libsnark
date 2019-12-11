@@ -285,6 +285,7 @@ template<typename FieldT>
 linear_combination<FieldT> linear_combination<FieldT>::operator+(const linear_combination<FieldT> &other) const
 {
     linear_combination<FieldT> result;
+    result.terms.reserve(this->terms.size() + other.terms.size());
 
     auto it1 = this->terms.begin();
     auto it2 = other.terms.begin();
@@ -305,7 +306,7 @@ linear_combination<FieldT> linear_combination<FieldT>::operator+(const linear_co
         else
         {
             /* it1->index == it2->index */
-            result.terms.emplace_back(linear_term<FieldT>(variable<FieldT>(it1->index), it1->coeff + it2->coeff));
+            result.terms.emplace_back(variable<FieldT>(it1->index), it1->coeff + it2->coeff);
             ++it1;
             ++it2;
         }

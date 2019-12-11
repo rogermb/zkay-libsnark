@@ -33,12 +33,33 @@ r1cs_constraint_system<libff::Fr<libff::default_ec_pp> > get_constraint_system_f
     const GLA adapter;
 
     GLA::protoboard_t converted_pb = adapter.convert(pb);
-    for (const GLA::constraint_t &constr : converted_pb.first)
+    const int num_constraints = converted_pb.first.size();
+    result.constraints.resize(num_constraints);
+    printf("Num constraints: %d\n", num_constraints);
+
+#ifdef MULTICORE
+#pragma omp parallel default(none) shared(converted_pb, result), firstprivate(num_constraints)
+  {
+#pragma omp single nowait
     {
-        result.constraints.emplace_back(r1cs_constraint<FieldT>(convert_gadgetlib2_linear_combination(std::get<0>(constr)),
-                                                                convert_gadgetlib2_linear_combination(std::get<1>(constr)),
-                                                                convert_gadgetlib2_linear_combination(std::get<2>(constr))));
+#endif
+      for (int i = 0; i < num_constraints; ++i) {
+        const auto& constr = converted_pb.first[i];
+#ifdef MULTICORE
+#pragma omp task default(none) shared(result, constr, i)
+        {
+#endif
+          result.constraints[i].a = convert_gadgetlib2_linear_combination(std::get<0>(constr));
+          result.constraints[i].b = convert_gadgetlib2_linear_combination(std::get<1>(constr));
+          result.constraints[i].c = convert_gadgetlib2_linear_combination(std::get<2>(constr));
+        }
+#ifdef MULTICORE
+      }
     }
+#pragma omp taskwait
+  }
+#endif
+
     //The number of variables is the highest index created.
     //TODO: If there are multiple protoboards, or variables not assigned to a protoboard, then getNextFreeIndex() is *not* the number of variables! See also in get_variable_assignment_from_gadgetlib2.
     const size_t num_variables = GLA::getNextFreeIndex();
