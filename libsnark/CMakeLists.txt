@@ -701,6 +701,23 @@ set_target_properties(run_ppzksnark
     RUNTIME_OUTPUT_DIRECTORY "jsnark_interface/"
 )
 
+# EDIT by nicbauma, build zkay libsnark interface
+
+file(MAKE_DIRECTORY zkay_interface)
+add_executable(run_snark
+        jsnark_interface/Util.hpp
+        jsnark_interface/Util.cpp
+        jsnark_interface/CircuitReader.hpp
+        jsnark_interface/CircuitReader.cpp
+        jsnark_interface/zkay_interface/run_snark.cpp)
+target_link_libraries(run_snark snark)
+set_target_properties(run_snark
+  PROPERTIES
+  ARCHIVE_OUTPUT_DIRECTORY "zkay_interface/"
+  LIBRARY_OUTPUT_DIRECTORY "zkay_interface/"
+  RUNTIME_OUTPUT_DIRECTORY "zkay_interface/"
+)
+
 include(CTest)
 add_test(
   NAME common_routing_algorithms_test
