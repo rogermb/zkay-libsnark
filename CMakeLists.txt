@@ -4,7 +4,7 @@ project (libsnark)
 
 set(
   CURVE
-  "BN128"
+  "ALT_BN128"
   CACHE
   STRING
   "Default curve: one of ALT_BN128, BN128, EDWARDS, MNT4, MNT6"
@@ -23,7 +23,7 @@ option(
 option(
   MULTICORE
   "Enable parallelized execution, using OpenMP"
-  OFF
+  ON
 )
 option(
   BINARY_OUTPUT
@@ -38,7 +38,7 @@ option(
 option(
   USE_PT_COMPRESSION
   "Use point compression"
-  ON
+  OFF
 )
 option(
   PROFILE_OP_COUNTS
@@ -54,13 +54,13 @@ option(
 option(
   WITH_SUPERCOP
   "Support for Ed25519 signatures required by ADSNARK"
-  ON
+  OFF
 )
 
 option(
   WITH_PROCPS
   "Use procps for memory profiling"
-  ON
+  OFF
 )
 
 option(
@@ -72,7 +72,7 @@ option(
 option(
   PERFORMANCE
   "Enable link-time and aggressive optimizations"
-  OFF
+  ON
 )
 
 option(
