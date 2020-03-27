@@ -2,21 +2,26 @@
 // Created by nicbauma on 31.10.19.
 //
 
+#include <libsnark/zk_proof_systems/ppzksnark/r1cs_ppzksnark/r1cs_ppzksnark.hpp>
+#include <libsnark/zk_proof_systems/ppzksnark/r1cs_gg_ppzksnark/r1cs_gg_ppzksnark.hpp>
 #include <libsnark/zk_proof_systems/ppzksnark/r1cs_se_ppzksnark/r1cs_se_ppzksnark.hpp>
-#include <libsnark/common/default_types/r1cs_se_ppzksnark_pp.hpp>
+
 #include <libsnark/jsnark_interface/CircuitReader.hpp>
 
 enum ProvingScheme {
+    PGHR13,
+    GROTH16,
     GM17
 };
 
 // External interface
 extern "C" {
-int generate_keys(const char *circuit_output_dir, int proving_scheme);
-int generate_proof(const char *circuit_output_dir, const char *input_file, int proving_scheme, int check_verification);
+int generate_keys(const char *input_directory, const char *output_directory, int proving_scheme);
+int generate_proof(const char *keys_dir, const char *input_dir, const char *output_filename, int proving_scheme, int check_verification);
 }
 
-template<typename ppT>
+using ppT = libff::default_ec_pp;
+
 static string serialize(libff::G1<ppT> pt) {
     size_t num_limbs = libff::alt_bn128_Fq::num_limbs;
     pt.to_affine_coordinates();
@@ -25,7 +30,6 @@ static string serialize(libff::G1<ppT> pt) {
     return string(buf);
 }
 
-template<typename ppT>
 static string serialize(libff::G2<ppT> pt) {
     size_t num_limbs = libff::alt_bn128_Fq::num_limbs;
     pt.to_affine_coordinates();
@@ -37,25 +41,97 @@ static string serialize(libff::G2<ppT> pt) {
 }
 
 template<typename T>
-void writeToFile(const std::string &path, const T &obj) {
+static void writeToFile(const std::string &path, const T &obj) {
     std::ofstream fh(path, std::ios::binary);
     fh << obj;
 }
 
 template<typename T>
-T loadFromFile(const std::string &path) {
+static T loadFromFile(const std::string &path) {
     std::ifstream fh(path, std::ios::binary);
     T obj;
     fh >> obj;
     return obj;
 }
 
-template<typename ppT>
-static void generate_keys_gm17(const r1cs_constraint_system<FieldT> &cs,
-                               const std::string &prover_key_filename,
-                               const std::string &verification_key_filename) {
+static void serialize_vk(std::ofstream &vk_out, const r1cs_ppzksnark_verification_key<ppT> &vk,
+                         const r1cs_ppzksnark_proving_key<ppT> &) {
+    vk_out << serialize(vk.alphaA_g2);
+    vk_out << serialize(vk.alphaB_g1);
+    vk_out << serialize(vk.alphaC_g2);
+    vk_out << serialize(vk.gamma_g2);
+    vk_out << serialize(vk.gamma_beta_g1);
+    vk_out << serialize(vk.gamma_beta_g2);
+    vk_out << serialize(vk.rC_Z_g2);
+
+    const auto &IC = vk.encoded_IC_query;
+    vk_out << IC.size() + 1 << endl;
+    vk_out << serialize(IC.first);
+    for (size_t i = 0; i < IC.size(); i++) {
+        auto IC_N(IC.rest[i]);
+        vk_out << serialize(IC_N);
+    }
+}
+
+static void serialize_vk(std::ofstream &vk_out, const r1cs_gg_ppzksnark_verification_key<ppT> &vk,
+                         const r1cs_gg_ppzksnark_proving_key<ppT> &pk) {
+    vk_out << serialize(pk.alpha_g1);
+    vk_out << serialize(pk.beta_g2);
+    vk_out << serialize(vk.gamma_g2);
+    vk_out << serialize(vk.delta_g2);
+
+    const auto &abc = vk.gamma_ABC_g1;
+    vk_out << abc.size() + 1 << endl;
+    vk_out << serialize(abc.first);
+    for (size_t i = 0; i < abc.size(); i++) {
+        auto abc_n(abc.rest[i]);
+        vk_out << serialize(abc_n);
+    }
+}
+
+static void serialize_vk(std::ofstream &vk_out, const r1cs_se_ppzksnark_verification_key<ppT> &vk,
+                         const r1cs_se_ppzksnark_proving_key<ppT> &) {
+    vk_out << serialize(vk.H);
+    vk_out << serialize(vk.G_alpha);
+    vk_out << serialize(vk.H_beta);
+    vk_out << serialize(vk.G_gamma);
+    vk_out << serialize(vk.H_gamma);
+
+    vk_out << vk.query.size() << endl;
+    for (const libff::G1<ppT> &q : vk.query) {
+        vk_out << serialize(q);
+    }
+}
+
+static void serialize_proof(std::ofstream &p_out, const r1cs_ppzksnark_proof<ppT> &p) {
+    p_out << serialize(p.g_A.g);
+    p_out << serialize(p.g_A.h);
+    p_out << serialize(p.g_B.g);
+    p_out << serialize(p.g_B.h);
+    p_out << serialize(p.g_C.g);
+    p_out << serialize(p.g_C.h);
+    p_out << serialize(p.g_K);
+    p_out << serialize(p.g_H);
+}
+
+static void serialize_proof(std::ofstream &p_out, const r1cs_gg_ppzksnark_proof<ppT> &p) {
+    p_out << serialize(p.g_A);
+    p_out << serialize(p.g_B);
+    p_out << serialize(p.g_C);
+}
+
+static void serialize_proof(std::ofstream &p_out, const r1cs_se_ppzksnark_proof<ppT> &p) {
+    p_out << serialize(p.A);
+    p_out << serialize(p.B);
+    p_out << serialize(p.C);
+}
+
+template<typename KeyPairT, KeyPairT (*generate)(const r1cs_constraint_system<FieldT> &)>
+static void keygen(const r1cs_constraint_system<FieldT> &cs,
+                   const std::string &prover_key_filename,
+                   const std::string &verification_key_filename) {
     // Generate keypair
-    r1cs_se_ppzksnark_keypair<ppT> keypair = r1cs_se_ppzksnark_generator<ppT>(cs);
+    auto keypair = generate(cs);
 
     // Dump proving key to binary file
     libff::enter_block("WritingProverKey");
@@ -65,78 +141,66 @@ static void generate_keys_gm17(const r1cs_constraint_system<FieldT> &cs,
     // Dump verification key in text format
     libff::enter_block("SerializeVk");
     ofstream vk_out(verification_key_filename);
-    const auto &vk = keypair.vk;
-    vk_out << serialize<ppT>(vk.H);
-    vk_out << serialize<ppT>(vk.G_alpha);
-    vk_out << serialize<ppT>(vk.H_beta);
-    vk_out << serialize<ppT>(vk.G_gamma);
-    vk_out << serialize<ppT>(vk.H_gamma);
-    vk_out << vk.query.size() << endl;
-    for (const libff::G1<ppT> &q : keypair.vk.query) {
-        vk_out << serialize<ppT>(q);
-    }
+    serialize_vk(vk_out, keypair.vk, keypair.pk);
     libff::leave_block("SerializeVk");
 
     // Also dump in binary format for local verification
-    writeToFile(verification_key_filename + ".bin", vk);
+    writeToFile(verification_key_filename + ".bin", keypair.vk);
 }
 
-template<typename ppT>
-static bool generate_proof_gm17(const r1cs_primary_input<FieldT> &public_inputs,
-                                const r1cs_auxiliary_input<FieldT> &private_inputs,
-                                const std::string &prover_key_filename,
-                                const std::string &verification_key_filename,
-                                const std::string &proof_filename,
-                                bool check_verification) {
+template<typename ProofT, typename ProvingKeyT,
+        ProofT (*prove)(const ProvingKeyT &, const r1cs_primary_input<FieldT> &, const r1cs_auxiliary_input<FieldT> &),
+        typename VerificationKeyT,
+        bool (*verify)(const VerificationKeyT &, const r1cs_primary_input<FieldT> &, const ProofT &)>
+static bool proofgen(const r1cs_primary_input<FieldT> &public_inputs,
+                     const r1cs_auxiliary_input<FieldT> &private_inputs,
+                     const std::string &prover_key_filename,
+                     const std::string &verification_key_filename,
+                     const std::string &proof_filename,
+                     bool check_verification) {
 
-    r1cs_se_ppzksnark_proof<ppT> proof;
+    ProofT proof;
     {
         // Read proving key
         libff::enter_block("ReadingProverKey");
-        r1cs_se_ppzksnark_proving_key<ppT> pk = loadFromFile<r1cs_se_ppzksnark_proving_key<ppT>>(prover_key_filename);
+        auto pk = loadFromFile<ProvingKeyT>(prover_key_filename);
         libff::leave_block("ReadingProverKey");
 
         // Generate proof
-        proof = r1cs_se_ppzksnark_prover<ppT>(pk, public_inputs, private_inputs);
+        proof = prove(pk, public_inputs, private_inputs);
     }
 
     // Dump proof in text format
     libff::enter_block("SerializeProof");
     ofstream p(proof_filename);
-    p << serialize<ppT>(proof.A);
-    p << serialize<ppT>(proof.B);
-    p << serialize<ppT>(proof.C);
+    serialize_proof(p, proof);
     libff::leave_block("SerializeProof");
 
     if (check_verification) {
         // Check if verification works
-        r1cs_se_ppzksnark_verification_key<ppT> vk =
-                loadFromFile<r1cs_se_ppzksnark_verification_key<ppT>>(verification_key_filename);
+        auto vk = loadFromFile<VerificationKeyT>(verification_key_filename);
 
-        libff::print_header("R1CS SEppzkSNARK Verifier");
-        const bool ans = r1cs_se_ppzksnark_verifier_strong_IC<ppT>(vk, public_inputs, proof);
+        libff::enter_block("Verifying proof");
+        const bool ans = verify(vk, public_inputs, proof);
         printf("\n");
-        libff::print_indent();
-        libff::print_mem("after verifier");
         printf("* The verification result is: %s\n", (ans ? "PASS" : "FAIL"));
-        if (!ans) {
-            return false;
-        }
+        libff::leave_block("Verifying proof");
+        return ans;
     }
-
     return true;
 }
 
-int generate_keys(const char *circuit_output_dir, int proving_scheme) {
+int generate_keys(const char *input_directory, const char *output_directory, int proving_scheme) {
     libff::start_profiling();
     gadgetlib2::initPublicParamsFromDefaultPp();
     gadgetlib2::GadgetLibAdapter::resetVariableIndex();
 
     auto ps = static_cast<ProvingScheme>(proving_scheme);
-    const string out_dir(circuit_output_dir);
+    const string in_dir(input_directory);
+    const string out_dir(output_directory);
 
-    const string arith_filename = out_dir + "/circuit.arith";
-    const string dummy_input_filename = out_dir + "/circuit.in";
+    const string arith_filename = in_dir + "/circuit.arith";
+    const string dummy_input_filename = in_dir + "/circuit.in";
     const string prover_key_filename = out_dir + "/proving.key";
     const string verification_key_filename = out_dir + "/verification.key";
 
@@ -155,10 +219,20 @@ int generate_keys(const char *circuit_output_dir, int proving_scheme) {
     }
 
     switch (ps) {
+        case ProvingScheme::PGHR13:
+            libff::print_header("PGHR13 Generator");
+            keygen<r1cs_ppzksnark_keypair<ppT>, r1cs_ppzksnark_generator<ppT>>(cs, prover_key_filename,
+                                                                               verification_key_filename);
+            break;
+        case ProvingScheme::GROTH16:
+            libff::print_header("Groth16 Generator");
+            keygen<r1cs_gg_ppzksnark_keypair<ppT>, r1cs_gg_ppzksnark_generator<ppT>>(cs, prover_key_filename,
+                                                                                     verification_key_filename);
+            break;
         case ProvingScheme::GM17:
             libff::print_header("GM17 Generator");
-            generate_keys_gm17<libsnark::default_r1cs_se_ppzksnark_pp>(cs, prover_key_filename,
-                                                                       verification_key_filename);
+            keygen<r1cs_se_ppzksnark_keypair<ppT>, r1cs_se_ppzksnark_generator<ppT>>(cs, prover_key_filename,
+                                                                                     verification_key_filename);
             break;
         default:
             return -1;
@@ -167,18 +241,19 @@ int generate_keys(const char *circuit_output_dir, int proving_scheme) {
     return 0;
 }
 
-int generate_proof(const char *circuit_output_dir, const char *input_file, int proving_scheme, int check_verification) {
+int generate_proof(const char *keys_dir, const char *input_dir, const char *output_filename, int proving_scheme, int check_verification) {
     libff::start_profiling();
     gadgetlib2::initPublicParamsFromDefaultPp();
     gadgetlib2::GadgetLibAdapter::resetVariableIndex();
 
     auto ps = static_cast<ProvingScheme>(proving_scheme);
-    const string out_dir(circuit_output_dir);
+    const string in_dir(input_dir);
+    const string key_dir(keys_dir);
 
-    const string arith_filename = out_dir + "/circuit.arith";
-    const string prover_key_filename = out_dir + "/proving.key";
-    const string verification_key_filename = out_dir + "/verification.key.bin";
-    const string proof_filename = out_dir + "/proof.out";
+    const string arith_filename = in_dir + "/circuit.arith";
+    const string in_filename = in_dir + "/circuit.in";
+    const string prover_key_filename = key_dir + "/proving.key";
+    const string verification_key_filename = key_dir + "/verification.key.bin";
 
     r1cs_primary_input<FieldT> primary_input;
     r1cs_auxiliary_input<FieldT> auxiliary_input;
@@ -192,7 +267,7 @@ int generate_proof(const char *circuit_output_dir, const char *input_file, int p
                 ProtoboardPtr pb = gadgetlib2::Protoboard::create(gadgetlib2::R1P);
                 size_t primary_input_size;
                 {
-                    CircuitReader reader(arith_filename.c_str(), input_file, pb);
+                    CircuitReader reader(arith_filename.c_str(), in_filename.c_str(), pb);
                     primary_input_size = reader.getNumInputs() + reader.getNumOutputs();
                 }
                 cs = get_constraint_system_from_gadgetlib2(*pb);
@@ -213,29 +288,56 @@ int generate_proof(const char *circuit_output_dir, const char *input_file, int p
         }
     }
 
+    bool ret;
     switch (ps) {
+        case ProvingScheme::PGHR13: {
+            libff::print_header("PGHR13 Prover");
+            ret = proofgen<
+                    r1cs_ppzksnark_proof<ppT>, r1cs_ppzksnark_proving_key<ppT>, r1cs_ppzksnark_prover<ppT>,
+                    r1cs_ppzksnark_verification_key<ppT>, r1cs_ppzksnark_verifier_strong_IC<ppT>>(
+                            primary_input, auxiliary_input, prover_key_filename, verification_key_filename, output_filename,
+                            check_verification
+            );
+            break;
+        }
+        case ProvingScheme::GROTH16: {
+            libff::print_header("Groth16 Prover");
+            ret = proofgen<
+                    r1cs_gg_ppzksnark_proof<ppT>, r1cs_gg_ppzksnark_proving_key<ppT>, r1cs_gg_ppzksnark_prover<ppT>,
+                    r1cs_gg_ppzksnark_verification_key<ppT>, r1cs_gg_ppzksnark_verifier_strong_IC<ppT>>(
+                            primary_input, auxiliary_input, prover_key_filename, verification_key_filename, output_filename,
+                            check_verification
+            );
+            break;
+        }
         case ProvingScheme::GM17: {
             libff::print_header("GM17 Prover");
-            bool ret = generate_proof_gm17<libsnark::default_r1cs_se_ppzksnark_pp>(primary_input, auxiliary_input,
-                                                                                   prover_key_filename,
-                                                                                   verification_key_filename,
-                                                                                   proof_filename,
-                                                                                   check_verification);
-            if (!ret) return -2;
+            ret = proofgen<
+                    r1cs_se_ppzksnark_proof<ppT>, r1cs_se_ppzksnark_proving_key<ppT>, r1cs_se_ppzksnark_prover<ppT>,
+                    r1cs_se_ppzksnark_verification_key<ppT>, r1cs_se_ppzksnark_verifier_strong_IC<ppT>>(
+                            primary_input, auxiliary_input, prover_key_filename, verification_key_filename, output_filename,
+                            check_verification
+            );
             break;
         }
         default:
             return -1;
     }
+    if (!ret) return -2;
 
     return 0;
 }
 
 int main(int argc, char **argv) {
-    if (argc == 3 && strcmp("keygen", argv[1]) == 0) {
-        return generate_keys(".", stoi(string(argv[2])));
-    } else if (argc == 4 && strcmp("proofgen", argv[1]) == 0) {
-        return generate_proof(".", "circuit.in", stoi(string(argv[2])), stoi(string(argv[3])));
+    if (argc >= 5) {
+        const char *in_dir = argv[2];
+        const char *out_path = argv[3];
+        if (argc == 5 && strcmp("keygen", argv[1]) == 0) {
+            return generate_keys(in_dir, out_path, stoi(string(argv[4])));
+        } else if (argc == 7 && strcmp("proofgen", argv[1]) == 0) {
+            const char *key_dir = argv[4];
+            return generate_proof(key_dir, in_dir, out_path, stoi(string(argv[5])), stoi(string(argv[6])));
+        }
     }
     cerr << "Invalid command" << endl;
     return -1;
