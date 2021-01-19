@@ -340,23 +340,20 @@ void CircuitReader::constructCircuit(const char* arithFilepath) {
 void CircuitReader::mapValuesToProtoboard() {
 
 	int zeropGateIndex = 0;
-	for (const auto &iter : variableMap) {
-		Wire wireId = iter.first;
+	for (WireMap::iterator iter = variableMap.begin();
+			iter != variableMap.end(); ++iter) {
+		Wire wireId = iter->first;
 		pb->val(*variables[variableMap[wireId]]) = wireValues[wireId];
-	}
-	for (const auto &iter : variableMap) {
-		Wire wireId = iter.first;
 		if (zeropMap.find(wireId) != zeropMap.end()) {
 			LinearCombination l = *zeroPwires[zeropGateIndex++];
-			auto res = pb->val(l);
-			if (res == 0) {
+			if (pb->val(l) == 0) {
 				pb->val(*variables[zeropMap[wireId]]) = 0;
 			} else {
-				pb->val(*variables[zeropMap[wireId]]) = res.inverse(pb->fieldType_);
+				pb->val(*variables[zeropMap[wireId]]) = pb->val(l).inverse(
+						pb->fieldType_);
 			}
 		}
 	}
-
 	if (!pb->isSatisfied(PrintOptions::DBG_PRINT_IF_NOT_SATISFIED)) {
 		printf("Note: Protoboard Not Satisfied .. \n");
 		// assert(false);
