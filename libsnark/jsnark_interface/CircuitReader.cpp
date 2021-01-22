@@ -615,7 +615,7 @@ void CircuitReader::addNonzeroCheckConstraint(char* inputStr, char* outputStr) {
 	pb->addRank1Constraint(*l, *variables[currentVariableIdx], *vptr,
 			"condition * auxConditionInverse = output");
 
-	zeroPwires.push_back(l);
+	zeroPwires.push_back(make_shared<LinearCombination>(*l));
 	zeropMap[outputWireId] = currentVariableIdx;
 	currentVariableIdx++;
 
