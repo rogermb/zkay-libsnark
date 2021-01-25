@@ -87,7 +87,7 @@ private:
 	void constructCircuit(const char*);  // Second Pass:
 	void mapValuesToProtoboard();
 
-	int find(unsigned int, LinearCombinationPtr&, bool intentionToEdit = false);
+	void find(unsigned int, LinearCombinationPtr&, bool intentionToEdit = false);
 	void clean();
 
 	void addMulConstraint(char*, char*);
